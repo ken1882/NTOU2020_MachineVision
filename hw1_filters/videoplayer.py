@@ -60,7 +60,6 @@ class VideoPlayer:
   def update_codec(self):
     while not self.FLAG_CODEC_STOP:
       if not self.queue.full():
-        # self.video.set(cv2.CAP_PROP_POS_FRAMES, self.cur_frame)
         ret, frame = self.video.read()
         if not ret:
           self.FLAG_CODEC_STOP = True
@@ -121,7 +120,7 @@ class VideoPlayer:
 
     frame2 = filter.greyscale(frame)
     frame3 = filter.sharpen(frame)
-    frame4 = filter.emboss(frame)
+    frame4 = filter.inverted(frame)
     
     canvas[0:frame.shape[0], 0:frame.shape[1]] += frame
     canvas[0:frame.shape[0], mx:mx+frame.shape[1]] += frame2

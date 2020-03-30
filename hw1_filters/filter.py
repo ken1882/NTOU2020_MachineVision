@@ -7,12 +7,13 @@ GREY_KERNEL = np.array((0.25, 0.3, 0.25))
 GREY_KERNEL = GREY_KERNEL.reshape(1, 1, 3, 1)
 TF_GERY_KERNEL = tf.convert_to_tensor(GREY_KERNEL, tf.float32)
 
-def translate_bgr_kernel(h, w, ink):
+# Transform the kernel that only focus on
+# birghtness(value) to HSV compatible one
+def vkernel2hsv(h, w, ink):
   tmp = np.zeros((h, w, 3, 3))
   for i in range(h):
     for j in range(w):
       tmp[i,j,2,2] += (ink[i,j] / h / w)
-  # tmp[2,2,:,:] = ink
   return tmp
 
 SHARP_KERNEL = np.array((
@@ -21,14 +22,7 @@ SHARP_KERNEL = np.array((
   ( 0, -1,  0),
 ))
 
-EMBOSS_KERNEL = np.array((
-  (-2, -1, 0),
-  (-1,  1, 1),
-  ( 0,  1, 2),
-))
-
-TF_SHARP_KERNEL  = tf.convert_to_tensor(translate_bgr_kernel(*(SHARP_KERNEL.shape),SHARP_KERNEL), tf.float32)
-TF_EMBOSS_KERNEL = tf.convert_to_tensor(translate_bgr_kernel(*(EMBOSS_KERNEL.shape),EMBOSS_KERNEL), tf.float32)
+TF_SHARP_KERNEL  = tf.convert_to_tensor(vkernel2hsv(*(SHARP_KERNEL.shape),SHARP_KERNEL), tf.float32)
 
 def fit_tfdim(data):
   if data.ndim >= 4:
@@ -52,8 +46,8 @@ def process_V_filter(frame, kernel):
 def sharpen(frame):
   return process_V_filter(frame, TF_SHARP_KERNEL)
 
-def emboss(frame):
-  return process_V_filter(frame, TF_EMBOSS_KERNEL)
+def inverted(frame):
+  return 0xFF - frame
 
 if __name__ == "__main__":
   img = cv2.imread("test.png")
