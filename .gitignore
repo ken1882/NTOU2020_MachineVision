@@ -4,3 +4,4 @@ __pycache__
 *.mkv
 *.jpg
 *.png
+/*/.ipynb_checkpoints/*
