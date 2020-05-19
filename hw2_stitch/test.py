@@ -14,7 +14,7 @@ def set_frame_number(x):
 result = np.zeros((int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))//4,int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))//4*3,3))
 count  = np.zeros((int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))//4,int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))//4*3))
 ones = np.ones(((int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))//4,int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))//4)))
-
+print(ones.shape)
 cv2.namedWindow('matching')
 cv2.createTrackbar('frame no.','matching',0,total_frame-1,set_frame_number)
 
@@ -46,10 +46,14 @@ while frame_num < total_frame and frame_num < 95:
         count += t_count.astype(np.float)
         disp = result.copy()
         cv2.imshow('stitched image',disp.astype(np.uint8))
-    
+        # print(list(count[200]))
         frame1 = frame2
         kp1 = kp2
         dt1 = dt2
+        print(ones[200][-50:])
+        print(t_count.astype(np.float)[200][-50:])
+        print(result.shape[1], result.shape[0])
+        print(T)
     else:
         # Match descriptors.
         matches = bf.match(dt2,dt1)
@@ -94,7 +98,7 @@ while frame_num < total_frame and frame_num < 95:
         kp1 = kp2
         dt1 = dt2
 
-    key = cv2.waitKey(20) & 0xFF
+    key = cv2.waitKey(0) & 0xFF
     if key == 27:
         break
     frame_num += 1

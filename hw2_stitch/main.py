@@ -22,9 +22,14 @@ FeatureMatcher  = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
 
 CANVAS_WIDTH  = ORI_WIDTH // DIV_FACTOR * MUL_FACTOR
 CANVAS_HEIGHT = ORI_HEIGHT // DIV_FACTOR
-VideoCanvas  = np.zeros((CANVAS_HEIGHT, CANVAS_WIDTH, 3))
-CanvasCount  = np.zeros((CANVAS_HEIGHT, CANVAS_WIDTH))
-CanvasOnes   = np.ones((CANVAS_HEIGHT, CANVAS_HEIGHT))
+CANVAS_WIDTH2  = int(CANVAS_WIDTH  * 1.2)
+CANVAS_HEIGHT2 = int(CANVAS_HEIGHT * 4)
+
+VideoCanvas   = np.zeros((CANVAS_HEIGHT, CANVAS_WIDTH, 3))
+VideoCanvas2  = np.zeros((CANVAS_HEIGHT2, CANVAS_WIDTH2, 3))
+
+CanvasCount   = np.zeros((CANVAS_HEIGHT, CANVAS_WIDTH))
+CanvasCount2   = np.zeros((CANVAS_HEIGHT2, CANVAS_WIDTH2))
 
 CANDIDATE_NUM = 5
 
@@ -32,6 +37,8 @@ METHOD_HOMOGRAPHY = 0
 METHOD_STACKING   = 1
 METHOD_ADD        = 2
 METHOD_FILLING    = 3
+
+WARP_FLAGS = cv2.INTER_AREA+cv2.WARP_FILL_OUTLIERS
 
 def get_img_size(img):
   return [img.shape[1], img.shape[0]]
@@ -66,30 +73,123 @@ class ImageFragment:
   def load(self):
     return load_and_resize(self.file)
 
+def stitich_ordered_homography(files, current_canvas):
+  global VideoCanvas, VideoCanvas2
+  if current_canvas.shape == VideoCanvas.shape:
+    cur_canvas_width  = CANVAS_WIDTH
+    cur_canvas_height = CANVAS_HEIGHT
+    cur_counter = CanvasCount
+  elif current_canvas.shape == VideoCanvas2.shape:
+    cur_canvas_width  = CANVAS_WIDTH2
+    cur_canvas_height = CANVAS_HEIGHT2
+    cur_counter = CanvasCount2
+
+  lobound, upbound = 0, len(files) - 1
+  mid = upbound // 2
+  img0 = load_and_resize(files[mid])
+  gray = cv2.cvtColor(img0, cv2.COLOR_BGR2GRAY)
+  kp1,dt1 = FeatureDetector.detectAndCompute(gray, None)
+  kp0,dt0 = kp1,dt1
+  T1      = np.eye(3)
+  T1[0,2] = (cur_canvas_width - img0.shape[1]) // 2
+  T1[1,2] = 0
+  print(cur_canvas_width, img0.shape[1], T1[0,2])
+  ones = np.ones(tuple(DISPLAY_SIZE[::-1]))
+  current_canvas = cv2.warpPerspective(img0, T1, (cur_canvas_width, cur_canvas_height), flags=WARP_FLAGS).astype(np.float)
+  t_count  = cv2.warpPerspective(ones,T1,(cur_canvas_width, cur_canvas_height), flags=WARP_FLAGS).astype(np.float)
+  cur_counter += t_count.astype(np.float)
+  cv2.imshow(WINDOW_NAME, np.array(current_canvas, dtype=np.uint8))
+  cv2.waitKey(0)
+  idx = mid + 1
+  while idx <= upbound:
+    img2 = load_and_resize(files[idx])
+    print(files[idx])
+    kp2,dt2 = FeatureDetector.detectAndCompute(cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY), None)
+    matches = sorted(FeatureMatcher.match(dt2, dt1), key=lambda x:x.distance)
+    src, dst = [], []
+    for m in matches:
+      src.append(kp2[m.queryIdx].pt + (1,))
+      dst.append(kp1[m.trainIdx].pt + (1,))
+    src = np.array(src,dtype=np.float)
+    dst = np.array(dst,dtype=np.float)
+    A, mask = cv2.findHomography(src, dst, cv2.RANSAC)
+    T1 = T1.dot(A)
+    warp_img = cv2.warpPerspective(img2,T1,(cur_canvas_width, cur_canvas_height), flags=WARP_FLAGS).astype(np.float)
+    t_count  = cv2.warpPerspective(ones,T1,(cur_canvas_width, cur_canvas_height), flags=WARP_FLAGS).astype(np.float)
+    current_canvas += warp_img
+    cur_counter += t_count.astype(np.float)
+    t_count = cur_counter.copy()
+    t_count[t_count == 0] = 1
+    disp = current_canvas.copy() 
+    disp[:,:,0] = current_canvas[:,:,0] / t_count
+    disp[:,:,1] = current_canvas[:,:,1] / t_count
+    disp[:,:,2] = current_canvas[:,:,2] / t_count
+    cv2.imshow(WINDOW_NAME, np.array(disp, dtype=np.uint8))
+    cv2.imshow('matching',cv2.drawMatches(img2,kp2,img0,kp1,matches[:CANDIDATE_NUM], None, flags=cv2.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS))
+    key = cv2.waitKey(20)
+    if key == 27:
+      return
+    idx += 1
+    img0 = img2
+    kp1  = kp2
+    dt1  = dt2
+  T1      = np.eye(3)
+  T1[0,2] = (cur_canvas_width - img0.shape[1]) // 2
+  T1[1,2] = 0
+  kp1,dt1 = kp0,dt0
+  idx = mid - 1
+  while idx >= lobound:
+    img2 = load_and_resize(files[idx])
+    print(files[idx])
+    kp2,dt2 = FeatureDetector.detectAndCompute(cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY), None)
+    matches = sorted(FeatureMatcher.match(dt2, dt1), key=lambda x:x.distance)
+    src, dst = [], []
+    for m in matches:
+      src.append(kp2[m.queryIdx].pt + (1,))
+      dst.append(kp1[m.trainIdx].pt + (1,))
+    src = np.array(src,dtype=np.float)
+    dst = np.array(dst,dtype=np.float)
+    A, mask = cv2.findHomography(src, dst, cv2.RANSAC)
+    T1 = T1.dot(A)
+    warp_img = cv2.warpPerspective(img2,T1,(cur_canvas_width, cur_canvas_height), flags=WARP_FLAGS).astype(np.float)
+    t_count  = cv2.warpPerspective(ones,T1,(cur_canvas_width, cur_canvas_height), flags=WARP_FLAGS).astype(np.float)
+    current_canvas += warp_img
+    cur_counter += t_count.astype(np.float)
+    t_count = cur_counter.copy()
+    t_count[t_count == 0] = 1
+    disp = current_canvas.copy() 
+    disp[:,:,0] = current_canvas[:,:,0] / t_count
+    disp[:,:,1] = current_canvas[:,:,1] / t_count
+    disp[:,:,2] = current_canvas[:,:,2] / t_count
+    cv2.imshow(WINDOW_NAME, np.array(disp, dtype=np.uint8))
+    cv2.imshow('matching',cv2.drawMatches(img2,kp2,img0,kp1,matches[:CANDIDATE_NUM], None, flags=cv2.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS))
+    key = cv2.waitKey(20)
+    if key == 27:
+      return
+    idx -= 1
+    img0 = img2
+    kp1  = kp2
+    dt1  = dt2
+  cv2.waitKey(0)
 
 def stitich_ordered(files, method, offset):
-  global VideoCanvas, CanvasCount, CanvasOnes
+  global VideoCanvas, CanvasCount
   images = []
   img0  = load_and_resize(files[0])
   images.append(img0)
   gray0 = cv2.cvtColor(img0, cv2.COLOR_BGR2GRAY)
-  kp1 = FeatureDetector.detect(gray0,None)
-  dt1 = FeatureDetector.compute(gray0,kp1)[1]
-  T   = np.eye(3)
+  kp1,dt1 = FeatureDetector.detectAndCompute(gray0, None)
+  T      = np.eye(3)
   T[0,2] = offset
   T[1,2] = 0
-  VideoCanvas = cv2.warpPerspective(img0, T, (CANVAS_WIDTH, CANVAS_HEIGHT)).astype(np.float)
-
+  VideoCanvas = cv2.warpPerspective(img0, T, (CANVAS_WIDTH, CANVAS_HEIGHT), flags=WARP_FLAGS).astype(np.float)
   fragments = []
   frag0 = ImageFragment(files[0])
-
-  if method == METHOD_HOMOGRAPHY:
-    t_count = cv2.warpPerspective(CanvasOnes, T, (CANVAS_WIDTH, CANVAS_HEIGHT)).astype(np.float)
-    CanvasCount += t_count.astype(np.float)
-  elif method == METHOD_STACKING:
+  
+  if method == METHOD_STACKING:
     curx = offset
     errorx = 0.0
-  print(curx)
+  
   for i, file in enumerate(files):
     if i == 0:
       continue
@@ -99,38 +199,7 @@ def stitich_ordered(files, method, offset):
     kp2, dt2 = FeatureDetector.detectAndCompute(gray2, None)
     matches = sorted(FeatureMatcher.match(dt2, dt1), key=lambda x:x.distance)
     
-    if method == METHOD_HOMOGRAPHY:
-      src, dst = [], []
-      for m in matches:
-        src.append(kp2[m.queryIdx].pt + (1,))
-        dst.append(kp1[m.trainIdx].pt + (1,))
-      src = np.array(src,dtype=np.float)
-      dst = np.array(dst,dtype=np.float)
-      print(f"Matches: {len(matches)}")
-      print(f"{kp2[matches[0].queryIdx].pt}")
-      print(f"{src[0]} {dst[0]}")
-      print(src)
-      print('-'*15)
-      print(dst)
-      print('='*15)
-      A, mask = cv2.findHomography(src, dst, cv2.RANSAC)
-      print(A)
-      print('-'*15)
-      print(mask.shape)
-      T = T.dot(A)
-      warp_img = cv2.warpPerspective(img2,T,(CANVAS_WIDTH, CANVAS_HEIGHT)).astype(np.float)
-      t_count  = cv2.warpPerspective(CanvasOnes,T,(CANVAS_WIDTH, CANVAS_HEIGHT)).astype(np.float)
-      VideoCanvas += warp_img
-      CanvasCount += t_count.astype(np.float)
-      t_count = CanvasCount.copy()
-      t_count[t_count == 0] = 1
-      disp = VideoCanvas.copy()
-      disp[:,:,0] = VideoCanvas[:,:,0] / t_count
-      disp[:,:,1] = VideoCanvas[:,:,1] / t_count
-      disp[:,:,2] = VideoCanvas[:,:,2] / t_count
-      cv2.imshow(WINDOW_NAME, np.array(disp, dtype=np.uint8))
-      cv2.imshow('matching',cv2.drawMatches(img2,kp2,img0,kp1,matches[:CANDIDATE_NUM], None, flags=cv2.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS))
-    elif method == METHOD_STACKING:
+    if method == METHOD_STACKING:
       dx = 0
       for i, m in enumerate(matches):
         if i > CANDIDATE_NUM:
@@ -232,6 +301,8 @@ def generate_final_image(fragments, images=[], method=METHOD_STACKING):
       op = '+'
     elif method == METHOD_FILLING:
       op = 'x'
+    dx = max(0, dx)
+    dy = max(0, dy)
     merge_matrix(canvas, images[idx], dy, dx, op=op)
     if method == METHOD_ADD:
       ones = np.ones(images[idx].shape[0:2], dtype=np.int32)
@@ -245,8 +316,80 @@ def generate_final_image(fragments, images=[], method=METHOD_STACKING):
   cv2.imshow(WINDOW_NAME, np.array(canvas, np.uint8))
   cv2.waitKey(0)
 
+def stitich_pizza(files):
+  global VideoCanvas2, CanvasCount2
+  FeatureDetector = cv2.xfeatures2d.SIFT_create(nOctaveLayers=8,contrastThreshold=0.04,edgeThreshold=10,sigma=2.0)
+  FeatureMatcher  = cv2.BFMatcher(cv2.NORM_L1, crossCheck=True)
+  images = []
+  kps = []
+  dts = []
+  size = len(files)
+  for file in files:
+    images.append(load_and_resize(file))
+  idx = 0
+  image = images[idx]
+  ones = np.ones(tuple(DISPLAY_SIZE[::-1]))
+  kp0,dt0 = FeatureDetector.detectAndCompute(image, None)
+  kp1,dt1 = kp0,dt0
+  T   = np.eye(3)
+  T[0,2] = (CANVAS_WIDTH2 - image.shape[1]) // 2
+  T[1,2] = (CANVAS_HEIGHT2 - image.shape[0]) // 2
+  VideoCanvas2 = cv2.warpPerspective(image,T,(CANVAS_WIDTH2, CANVAS_HEIGHT2), flags=WARP_FLAGS).astype(np.float)
+  CanvasCount2 = cv2.warpPerspective(ones,T,(CANVAS_WIDTH2, CANVAS_HEIGHT2), flags=WARP_FLAGS).astype(np.float)
+  cv2.imshow(WINDOW_NAME, np.array(VideoCanvas2, dtype=np.uint8))
+  cv2.waitKey(0)
+  img0 = image
+  img_mid = image
+  sav_T   = None
+  sav_img = None
+  sav_kp  = None
+  sav_dt  = None
+  
+  while idx < size - 1:
+    idx += 1
+    image = images[idx]
+    print(files[idx])
+    if idx == size - 1:
+      T = sav_T
+      img0 = sav_img
+      kp1, dt1 = sav_kp, sav_dt
+      
+    kp2,dt2 = FeatureDetector.detectAndCompute(image, None)
+    matches = sorted(FeatureMatcher.match(dt2, dt1), key=lambda x:x.distance)
+    src, dst = [], []
+    for m in matches:
+      src.append(kp2[m.queryIdx].pt + (1,))
+      dst.append(kp1[m.trainIdx].pt + (1,))
+    src = np.array(src,dtype=np.float)
+    dst = np.array(dst,dtype=np.float)
+    A, mask = cv2.findHomography(src, dst, cv2.RANSAC, ransacReprojThreshold=1.0)
+    T = T.dot(A)
+    warp_img = cv2.warpPerspective(image,T,(CANVAS_WIDTH2, CANVAS_HEIGHT2), flags=WARP_FLAGS).astype(np.float)
+    t_count  = cv2.warpPerspective(ones,T,(CANVAS_WIDTH2, CANVAS_HEIGHT2), flags=WARP_FLAGS).astype(np.float)
+    if idx == 5:
+      sav_T = T
+      sav_dt = dt2
+      sav_kp = kp2
+      sav_img = image
+    VideoCanvas2 += warp_img
+    CanvasCount2 += t_count.astype(np.float)
+    t_count = CanvasCount2.copy()
+    t_count[t_count == 0] = 1
+    disp = VideoCanvas2.copy() 
+    disp[:,:,0] = VideoCanvas2[:,:,0] / t_count
+    disp[:,:,1] = VideoCanvas2[:,:,1] / t_count
+    disp[:,:,2] = VideoCanvas2[:,:,2] / t_count
+    cv2.imshow(WINDOW_NAME, np.array(disp, dtype=np.uint8))
+    cv2.imshow('matching',cv2.drawMatches(image,kp2,img0,kp1,matches[:CANDIDATE_NUM*5], None, flags=cv2.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS))
+    img0 = image
+    kp1,dt1 = kp2,dt2
+    key = cv2.waitKey(20)
+    if key == 27:
+      return
+  key = cv2.waitKey(0)
+
 def stitich_unordered(files, method):
-  global VideoCanvas, CanvasCount, CanvasOnes
+  global VideoCanvas, CanvasCount
   images = []
   kps = []
   dts = []
@@ -317,7 +460,11 @@ def stitich_unordered(files, method):
   generate_final_image(fragments, images, method=METHOD_FILLING)
 
 files = sorted(glob(f"{DATA_FOLDER}/*.{IMG_FORMAT}"), key=sort_by_findex)
+stitich_ordered_homography(files, VideoCanvas)
 stitich_ordered(files[::-1], METHOD_STACKING, 0)
+
 files = glob(f"dataset2/*.JPG")
 stitich_unordered(files, METHOD_STACKING)
+stitich_pizza(files)
+
 cv2.destroyAllWindows()
