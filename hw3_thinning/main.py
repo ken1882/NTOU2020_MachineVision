@@ -5,12 +5,12 @@ import matplotlib.pyplot as plt
 from copy import copy
 
 def _match_transition(mat_ele):
-  val = mat_ele
-  fst = val & 1
-  lst = fst
-  cur = 0
-  val = val >> 1
-  cnt = 0
+  val  = mat_ele
+  fst  = val & 1
+  val += fst * 256 # N7 -> N0
+  lst  = cur = fst
+  val  = val >> 1
+  cnt  = 0
   while val > 0:
     cur = val & 1
     if lst == 0 and cur == 1:
@@ -124,10 +124,8 @@ print(inputs.shape)
 inputs   = cv2.cvtColor(inputs,cv2.COLOR_BGR2GRAY)
 
 #顯示測試影像
-plt.figure(figsize=(20,15))
-plt.imshow(inputs,cmap='gray')
-plt.axis(False)
-plt.show()
+cv2.imshow("gray",inputs)
+cv2.waitKey(0)
 
 #轉換影像表示方式成四軸張量(sample,height,width,channel)，以便使用卷積運算。
 inputs = tf.convert_to_tensor(inputs,dtype=tf.float32)
@@ -156,7 +154,5 @@ outputs = tf.squeeze(outputs)
 cv2.imwrite('pcb_thinning.png',outputs.numpy())
 
 #注意由於螢幕解析度，同學在螢幕上看到的細線化結果可能不是真正結果，此時必須看存下來的結果影像。
-plt.figure(figsize=(20,15))        
-plt.imshow(outputs.numpy(),cmap='gray')
-plt.axis(False)
-plt.show()
+cv2.imshow('thinning', outputs.numpy())
+cv2.waitKey(0)
